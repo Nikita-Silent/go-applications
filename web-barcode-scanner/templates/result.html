@@ -1,0 +1,28 @@
+{{if .Error}}
+<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+    <strong class="font-bold">Ошибка!</strong>
+    <span class="block sm:inline">{{.Error}}</span>
+</div>
+<button onclick="resetScanner()" class="w-full mt-4 bg-blue-500 text-white py-2 rounded-md hover:bg-blue-600 transition">Попробовать снова</button>
+{{else}}
+<div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+    <table class="w-full border-collapse">
+        <caption class="text-lg font-semibold mb-2">Остатки по товару</caption>
+        <tr><td colspan="3" class="border p-2">{{.Item.Name}} / {{.Item.Characteristic}}</td></tr>
+        <tr><td colspan="3" class="border p-2">Цена товара: {{printf "%.2f" .Item.Price}} ₽</td></tr>
+        <tr class="bg-gray-100">
+            <th class="border p-2 text-left">Магазин</th>
+            <th class="border p-2 text-left">Серия</th>
+            <th class="border p-2 text-left">Остаток</th>
+        </tr>
+        {{range .Item.Stock}}
+        <tr>
+            <td class="border p-2">{{.Storage}}</td>
+            <td class="border p-2">{{.Series}}</td>
+            <td class="border p-2">{{printf "%.0f" .Count}}</td>
+        </tr>
+        {{end}}
+    </table>
+    <button onclick="resetScanner()" class="w-full mt-4 bg-blue-500 text-white py-2 rounded-md hover:bg-blue-600 transition">Сканировать ещё раз</button>
+</div>
+{{end}}

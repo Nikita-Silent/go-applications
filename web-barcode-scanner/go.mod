@@ -1,4 +1,4 @@
-module barcode-scan
+module web-barcode-scanner
 
 go 1.24.3
 

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сканер штрихкодов</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .spinner { border: 4px solid rgba(0, 0, 0, 0.1); border-left-color: #3b82f6; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; display: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center justify-center p-4">
+    <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+        <h1 class="text-2xl font-bold text-center text-gray-800 mb-4">Сканировать штрихкод</h1>
+        <div class="relative">
+            <video id="video" class="w-full rounded-md bg-black" autoplay playsinline muted></video>
+            <div id="spinner" class="spinner absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"></div>
+        </div>
+        <div id="result" class="text-center text-red-500 mt-4"></div>
+        <input type="file" id="fileInput" accept="image/*" class="hidden">
+        <button onclick="document.getElementById('fileInput').click();" class="w-full mt-4 bg-blue-500 text-white py-2 rounded-md hover:bg-blue-600 transition">Загрузить изображение</button>
+        <div id="resultContainer" class="mt-4"></div>
+    </div>
+
+    <script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
+    <script>
+        let codeReader = null;
+
+        async function startScanner() {
+            const resultDiv = document.getElementById('result');
+            const video = document.getElementById('video');
+            const spinner = document.getElementById('spinner');
+            codeReader = new ZXing.BrowserMultiFormatReader();
+
+            try {
+                console.log('Перечисление устройств...');
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                console.log('Видеоустройства:', videoDevices);
+                const rearCamera = videoDevices.find(device => device.label.toLowerCase().includes('back')) || videoDevices[0];
+
+                if (!rearCamera) {
+                    resultDiv.innerHTML = 'Камера не найдена';
+                    console.error('Камера не найдена');
+                    return;
+                }
+
+                console.log('Запуск видеопотока с устройством:', rearCamera.label);
+                codeReader.decodeFromVideoDevice(
+                    rearCamera.deviceId,
+                    'video',
+                    (result, err) => {
+                        if (result) {
+                            resultDiv.innerHTML = 'Обнаружен штрихкод: ' + result.text;
+                            console.log('Штрихкод обнаружен:', result.text);
+                            codeReader.reset();
+                            fetchData(result.text);
+                        }
+                        if (err && !(err instanceof ZXing.NotFoundException)) {
+                            resultDiv.innerHTML = 'Ошибка сканера: ' + err;
+                            console.error('Ошибка сканера:', err);
+                        }
+                    }
+                );
+                resultDiv.innerHTML = 'Сканер инициализирован, отсканируйте штрихкод';
+                console.log('Сканер инициализирован');
+            } catch (err) {
+                resultDiv.innerHTML = 'Ошибка инициализации сканера: ' + err;
+                console.error('Ошибка инициализации:', err);
+            }
+        }
+
+        document.getElementById('fileInput').addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            const resultDiv = document.getElementById('result');
+            const spinner = document.getElementById('spinner');
+            const codeReader = new ZXing.BrowserMultiFormatReader();
+
+            try {
+                spinner.style.display = 'block';
+                const img = new Image();
+                img.src = URL.createObjectURL(file);
+                await img.decode();
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const result = await codeReader.decodeFromImageData(imageData);
+                resultDiv.innerHTML = 'Обнаружен штрихкод из изображения: ' + result.text;
+                console.log('Штрихкод из изображения:', result.text);
+                fetchData(result.text);
+            } catch (err) {
+                resultDiv.innerHTML = 'Ошибка сканирования изображения: ' + err;
+                console.error('Ошибка сканирования изображения:', err);
+            } finally {
+                spinner.style.display = 'none';
+            }
+        });
+
+        function fetchData(barcode) {
+            const resultContainer = document.getElementById('resultContainer');
+            const spinner = document.getElementById('spinner');
+            spinner.style.display = 'block';
+            fetch('/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'barcode=' + encodeURIComponent(barcode)
+            })
+            .then(response => response.text())
+            .then(html => {
+                resultContainer.innerHTML = html;
+                document.getElementById('video').style.display = 'none';
+                document.getElementById('fileInput').style.display = 'none';
+                document.querySelector('button[onclick*="fileInput"]').style.display = 'none';
+            })
+            .catch(err => {
+                document.getElementById('result').innerHTML = 'Ошибка получения данных: ' + err;
+                console.error('Ошибка fetch:', err);
+            })
+            .finally(() => {
+                spinner.style.display = 'none';
+            });
+        }
+
+        function resetScanner() {
+            const resultContainer = document.getElementById('resultContainer');
+            resultContainer.innerHTML = '';
+            document.getElementById('video').style.display = 'block';
+            document.getElementById('fileInput').style.display = 'none';
+            document.querySelector('button[onclick*="fileInput"]').style.display = 'block';
+            document.getElementById('result').innerHTML = 'Инициализация сканера...';
+            startScanner();
+        }
+
+        if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+            document.getElementById('result').innerHTML = 'Для доступа к камере требуется HTTPS. Используйте HTTPS или localhost.';
+        } else {
+            startScanner();
+        }
+    </script>
+</body>
+</html>
