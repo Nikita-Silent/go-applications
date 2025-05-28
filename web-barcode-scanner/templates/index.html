@@ -20,8 +20,8 @@
         <div id="result" class="text-center text-red-500 mt-4"></div>
         <div class="flex space-x-2 mt-4">
             <input type="file" id="fileInput" accept="image/*" class="hidden">
-            <button onclick="document.getElementById('fileInput').click();" class="flex-1 bg-blue-500 text-white py-2 rounded-md hover:bg-blue-600 transition">Загрузить изображение</button>
-            <button onclick="switchCamera();" class="flex-1 bg-green-500 text-white py-2 rounded-md hover:bg-green-600 transition">Переключить камеру</button>
+            <button id="uploadButton" onclick="document.getElementById('fileInput').click();" class="flex-1 bg-blue-500 text-white py-2 rounded-md hover:bg-blue-600 transition">Загрузить изображение</button>
+            <button id="switchCameraButton" onclick="switchCamera();" class="flex-1 bg-green-500 text-white py-2 rounded-md hover:bg-green-600 transition">Переключить камеру</button>
         </div>
         <div id="resultContainer" class="mt-4"></div>
     </div>
@@ -33,24 +33,35 @@
         let videoDevices = [];
         let selectedDeviceId = null;
 
+        async function initializeDevices() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                videoDevices = devices.filter(device => device.kind === 'videoinput');
+                console.log('Видеоустройства:', videoDevices);
+                if (videoDevices.length === 0) {
+                    document.getElementById('result').innerHTML = 'Камера не найдена';
+                    console.error('Камера не найдена');
+                    return false;
+                }
+                return true;
+            } catch (err) {
+                document.getElementById('result').innerHTML = 'Ошибка доступа к камерам: ' + err;
+                console.error('Ошибка доступа к камерам:', err);
+                return false;
+            }
+        }
+
         async function startScanner() {
             const resultDiv = document.getElementById('result');
             const video = document.getElementById('video');
             const spinner = document.getElementById('spinner');
             codeReader = new ZXing.BrowserMultiFormatReader();
 
+            if (videoDevices.length === 0) {
+                if (!(await initializeDevices())) return;
+            }
+
             try {
-                console.log('Перечисление устройств...');
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                videoDevices = devices.filter(device => device.kind === 'videoinput');
-                console.log('Видеоустройства:', videoDevices);
-
-                if (videoDevices.length === 0) {
-                    resultDiv.innerHTML = 'Камера не найдена';
-                    console.error('Камера не найдена');
-                    return;
-                }
-
                 // Выбираем заднюю камеру по умолчанию, если deviceId не установлен
                 if (!selectedDeviceId) {
                     const rearCamera = videoDevices.find(device => device.label.toLowerCase().includes('back')) || videoDevices[0];
@@ -86,6 +97,7 @@
         function switchCamera() {
             if (videoDevices.length <= 1) {
                 document.getElementById('result').innerHTML = 'Дополнительные камеры не найдены';
+                console.log('Только одна камера доступна');
                 return;
             }
 
@@ -147,8 +159,8 @@
                 resultContainer.innerHTML = html;
                 document.getElementById('video').style.display = 'none';
                 document.getElementById('fileInput').style.display = 'none';
-                document.querySelector('button[onclick*="fileInput"]').style.display = 'none';
-                document.querySelector('button[onclick="switchCamera()"]').style.display = 'none';
+                document.getElementById('uploadButton').style.display = 'none';
+                document.getElementById('switchCameraButton').style.display = 'none';
             })
             .catch(err => {
                 document.getElementById('result').innerHTML = 'Ошибка получения данных: ' + err;
@@ -164,8 +176,8 @@
             resultContainer.innerHTML = '';
             document.getElementById('video').style.display = 'block';
             document.getElementById('fileInput').style.display = 'none';
-            document.querySelector('button[onclick*="fileInput"]').style.display = 'block';
-            document.querySelector('button[onclick="switchCamera()"]').style.display = 'block';
+            document.getElementById('uploadButton').style.display = 'block';
+            document.getElementById('switchCameraButton').style.display = 'block';
             document.getElementById('result').innerHTML = 'Инициализация сканера...';
             startScanner();
         }
@@ -173,7 +185,9 @@
         if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
             document.getElementById('result').innerHTML = 'Для доступа к камере требуется HTTPS. Используйте HTTPS или localhost.';
         } else {
-            startScanner();
+            initializeDevices().then(hasDevices => {
+                if (hasDevices) startScanner();
+            });
         }
     </script>
 </body>
