@@ -37,16 +37,16 @@
             try {
                 const devices = await navigator.mediaDevices.enumerateDevices();
                 videoDevices = devices.filter(device => device.kind === 'videoinput');
-                console.log('Видеоустройства:', videoDevices);
+                console.log(`[Инициализация] Найдено камер: ${videoDevices.length}`, videoDevices.map(d => ({ label: d.label, id: d.deviceId })));
                 if (videoDevices.length === 0) {
                     document.getElementById('result').innerHTML = 'Камера не найдена';
-                    console.error('Камера не найдена');
+                    console.error('[ERROR] Камеры не найдены');
                     return false;
                 }
                 return true;
             } catch (err) {
                 document.getElementById('result').innerHTML = 'Ошибка доступа к камерам: ' + err;
-                console.error('Ошибка доступа к камерам:', err);
+                console.error('[ERROR] Ошибка доступа к камерам:', err);
                 return false;
             }
         }
@@ -57,60 +57,75 @@
             const spinner = document.getElementById('spinner');
             codeReader = new ZXing.BrowserMultiFormatReader();
 
+            // Обновляем список устройств
             if (videoDevices.length === 0) {
-                if (!(await initializeDevices())) return;
+                console.log('[startScanner] Список камер пуст, инициализируем устройства');
+                if (!(await initializeDevices())) {
+                    return;
+                }
             }
 
             try {
-                // Выбираем заднюю камеру по умолчанию, если deviceId не установлен
+                // Выбираем заднюю камеру по умолчанию, если deviceId не задан
                 if (!selectedDeviceId) {
                     const rearCamera = videoDevices.find(device => device.label.toLowerCase().includes('back')) || videoDevices[0];
                     selectedDeviceId = rearCamera.deviceId;
                     currentCameraIndex = videoDevices.findIndex(device => device.deviceId === selectedDeviceId);
+                    console.log(`[startScanner] Выбрана камера по умолчанию: ${rearCamera.label} (index: ${currentCameraIndex})`);
                 }
 
-                console.log('Запуск видеопотока с устройством:', videoDevices[currentCameraIndex].label);
+                console.log(`[startScanner] Запуск видеопотока с устройством: ${videoDevices[currentCameraIndex].label} (ID: ${selectedDeviceId})`);
                 codeReader.decodeFromVideoDevice(
                     selectedDeviceId,
                     'video',
                     (result, err) => {
                         if (result) {
                             resultDiv.innerHTML = 'Обнаружен штрихкод: ' + result.text;
-                            console.log('Штрихкод обнаружен:', result.text);
+                            console.log('[Scanner] Штрихкод обнаружен:', result.text);
                             codeReader.reset();
                             fetchData(result.text);
                         }
                         if (err && !(err instanceof ZXing.NotFoundException)) {
                             resultDiv.innerHTML = 'Ошибка сканера: ' + err;
-                            console.error('Ошибка сканера:', err);
+                            console.error('[ERROR] Ошибка сканера:', err);
                         }
                     }
                 );
                 resultDiv.innerHTML = 'Сканер инициализирован, отсканируйте штрихкод';
-                console.log('Сканер инициализирован');
+                console.log('[startScanner] Сканер инициализирован');
             } catch (err) {
                 resultDiv.innerHTML = 'Ошибка инициализации сканера: ' + err;
-                console.error('Ошибка инициализации:', err);
+                console.error('[ERROR] Ошибка инициализации сканера:', err);
             }
         }
 
-        function switchCamera() {
+        async function switchCamera() {
+            console.log('[switchCamera] Попытка переключения камеры');
+            // Обновляем список устройств перед переключением
+            if (!(await initializeDevices())) {
+                document.getElementById('result').innerHTML = 'Камеры не найдены';
+                console.error('[switchCamera] Камеры не найдены');
+                return;
+            }
+
             if (videoDevices.length <= 1) {
                 document.getElementById('result').innerHTML = 'Дополнительные камеры не найдены';
-                console.log('Только одна камера доступна');
+                console.log('[switchCamera] Только одна камера доступна:', videoDevices);
                 return;
             }
 
             // Останавливаем текущий сканер
             if (codeReader) {
+                console.log('[switchCamera] Сброс текущего сканера');
                 codeReader.reset();
             }
 
             // Переключаем на следующую камеру
             currentCameraIndex = (currentCameraIndex + 1) % videoDevices.length;
             selectedDeviceId = videoDevices[currentCameraIndex].deviceId;
+            console.log(`[switchCamera] Переключение на камеру: ${videoDevices[currentCameraIndex].label} (index: ${currentCameraIndex}, ID: ${selectedDeviceId})`);
 
-            // Перезапускаем сканер с новой камерой
+            // Перезапускаем сканер
             document.getElementById('result').innerHTML = 'Переключение на камеру: ' + videoDevices[currentCameraIndex].label;
             startScanner();
         }
@@ -135,11 +150,11 @@
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 const result = await codeReader.decodeFromImageData(imageData);
                 resultDiv.innerHTML = 'Обнаружен штрихкод из изображения: ' + result.text;
-                console.log('Штрихкод из изображения:', result.text);
+                console.log('[FileInput] Штрихкод из изображения:', result.text);
                 fetchData(result.text);
             } catch (err) {
                 resultDiv.innerHTML = 'Ошибка сканирования изображения: ' + err;
-                console.error('Ошибка сканирования изображения:', err);
+                console.error('[ERROR] Ошибка сканирования изображения:', err);
             } finally {
                 spinner.style.display = 'none';
             }
@@ -148,6 +163,7 @@
         function fetchData(barcode) {
             const resultContainer = document.getElementById('resultContainer');
             const spinner = document.getElementById('spinner');
+            console.log('[fetchData] Отправка запроса для штрихкода:', barcode);
             spinner.style.display = 'block';
             fetch('/scan', {
                 method: 'POST',
@@ -161,13 +177,15 @@
                 document.getElementById('fileInput').style.display = 'none';
                 document.getElementById('uploadButton').style.display = 'none';
                 document.getElementById('switchCameraButton').style.display = 'none';
+                console.log('[fetchData] Данные получены, интерфейс обновлён');
             })
             .catch(err => {
                 document.getElementById('result').innerHTML = 'Ошибка получения данных: ' + err;
-                console.error('Ошибка fetch:', err);
+                console.error('[ERROR] Ошибка fetch:', err);
             })
             .finally(() => {
                 spinner.style.display = 'none';
+                console.log('[fetchData] Запрос завершён');
             });
         }
 
@@ -179,11 +197,13 @@
             document.getElementById('uploadButton').style.display = 'block';
             document.getElementById('switchCameraButton').style.display = 'block';
             document.getElementById('result').innerHTML = 'Инициализация сканера...';
+            console.log('[resetScanner] Сброс интерфейса, запуск сканера');
             startScanner();
         }
 
         if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
             document.getElementById('result').innerHTML = 'Для доступа к камере требуется HTTPS. Используйте HTTPS или localhost.';
+            console.error('[ERROR] HTTPS требуется для доступа к камере');
         } else {
             initializeDevices().then(hasDevices => {
                 if (hasDevices) startScanner();
