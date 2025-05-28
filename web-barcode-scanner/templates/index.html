@@ -18,14 +18,20 @@
             <div id="spinner" class="spinner absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"></div>
         </div>
         <div id="result" class="text-center text-red-500 mt-4"></div>
-        <input type="file" id="fileInput" accept="image/*" class="hidden">
-        <button onclick="document.getElementById('fileInput').click();" class="w-full mt-4 bg-blue-500 text-white py-2 rounded-md hover:bg-blue-600 transition">Загрузить изображение</button>
+        <div class="flex space-x-2 mt-4">
+            <input type="file" id="fileInput" accept="image/*" class="hidden">
+            <button onclick="document.getElementById('fileInput').click();" class="flex-1 bg-blue-500 text-white py-2 rounded-md hover:bg-blue-600 transition">Загрузить изображение</button>
+            <button onclick="switchCamera();" class="flex-1 bg-green-500 text-white py-2 rounded-md hover:bg-green-600 transition">Переключить камеру</button>
+        </div>
         <div id="resultContainer" class="mt-4"></div>
     </div>
 
     <script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
     <script>
         let codeReader = null;
+        let currentCameraIndex = 0;
+        let videoDevices = [];
+        let selectedDeviceId = null;
 
         async function startScanner() {
             const resultDiv = document.getElementById('result');
@@ -36,19 +42,25 @@
             try {
                 console.log('Перечисление устройств...');
                 const devices = await navigator.mediaDevices.enumerateDevices();
-                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                videoDevices = devices.filter(device => device.kind === 'videoinput');
                 console.log('Видеоустройства:', videoDevices);
-                const rearCamera = videoDevices.find(device => device.label.toLowerCase().includes('back')) || videoDevices[0];
 
-                if (!rearCamera) {
+                if (videoDevices.length === 0) {
                     resultDiv.innerHTML = 'Камера не найдена';
                     console.error('Камера не найдена');
                     return;
                 }
 
-                console.log('Запуск видеопотока с устройством:', rearCamera.label);
+                // Выбираем заднюю камеру по умолчанию, если deviceId не установлен
+                if (!selectedDeviceId) {
+                    const rearCamera = videoDevices.find(device => device.label.toLowerCase().includes('back')) || videoDevices[0];
+                    selectedDeviceId = rearCamera.deviceId;
+                    currentCameraIndex = videoDevices.findIndex(device => device.deviceId === selectedDeviceId);
+                }
+
+                console.log('Запуск видеопотока с устройством:', videoDevices[currentCameraIndex].label);
                 codeReader.decodeFromVideoDevice(
-                    rearCamera.deviceId,
+                    selectedDeviceId,
                     'video',
                     (result, err) => {
                         if (result) {
@@ -69,6 +81,26 @@
                 resultDiv.innerHTML = 'Ошибка инициализации сканера: ' + err;
                 console.error('Ошибка инициализации:', err);
             }
+        }
+
+        function switchCamera() {
+            if (videoDevices.length <= 1) {
+                document.getElementById('result').innerHTML = 'Дополнительные камеры не найдены';
+                return;
+            }
+
+            // Останавливаем текущий сканер
+            if (codeReader) {
+                codeReader.reset();
+            }
+
+            // Переключаем на следующую камеру
+            currentCameraIndex = (currentCameraIndex + 1) % videoDevices.length;
+            selectedDeviceId = videoDevices[currentCameraIndex].deviceId;
+
+            // Перезапускаем сканер с новой камерой
+            document.getElementById('result').innerHTML = 'Переключение на камеру: ' + videoDevices[currentCameraIndex].label;
+            startScanner();
         }
 
         document.getElementById('fileInput').addEventListener('change', async (event) => {
@@ -116,6 +148,7 @@
                 document.getElementById('video').style.display = 'none';
                 document.getElementById('fileInput').style.display = 'none';
                 document.querySelector('button[onclick*="fileInput"]').style.display = 'none';
+                document.querySelector('button[onclick="switchCamera()"]').style.display = 'none';
             })
             .catch(err => {
                 document.getElementById('result').innerHTML = 'Ошибка получения данных: ' + err;
@@ -132,6 +165,7 @@
             document.getElementById('video').style.display = 'block';
             document.getElementById('fileInput').style.display = 'none';
             document.querySelector('button[onclick*="fileInput"]').style.display = 'block';
+            document.querySelector('button[onclick="switchCamera()"]').style.display = 'block';
             document.getElementById('result').innerHTML = 'Инициализация сканера...';
             startScanner();
         }
