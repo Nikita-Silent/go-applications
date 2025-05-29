@@ -1,4 +1,4 @@
-# Используем Go для сборки
+# Используем Go 1.24 для сборки
 FROM golang:1.24-alpine AS builder
 
 # Устанавливаем рабочую директорию
@@ -15,7 +15,11 @@ RUN go mod download
 COPY main.go ./
 COPY services/ ./services/
 COPY handlers/ ./handlers/
+COPY models/ ./models/
 COPY templates/ ./templates/
+
+# Отладка: проверяем содержимое models
+RUN ls -la models/
 
 # Компилируем приложение
 RUN go build -o web-barcode-scanner main.go
