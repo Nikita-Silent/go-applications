@@ -1,67 +1,75 @@
 package services
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
-	"os/exec"
+	"net/http"
+	"strings"
 
 	"web-barcode-scanner/models"
 )
 
-type Config struct {
-	APIURL   string
-	APIToken string
-	APIAuth  string
-}
-
 type BarcodeService struct {
-	config Config
+	client  *http.Client
+	baseURL string
+	token   string
+	auth    string
 }
 
-func NewBarcodeService(config Config) *BarcodeService {
-	return &BarcodeService{config: config}
+func NewBarcodeService(baseURL, token, auth string) *BarcodeService {
+	return &BarcodeService{
+		client:  &http.Client{},
+		baseURL: baseURL,
+		token:   token,
+		auth:    auth,
+	}
 }
 
 func (s *BarcodeService) FetchBarcodeData(barcode string) (*models.ItemResponse, error) {
-	// Формируем команду curl
-	url := fmt.Sprintf("%s?barcode=%s", s.config.APIURL, barcode)
-	cmd := exec.Command("curl",
-		"-H", fmt.Sprintf("Token: %s", s.config.APIToken),
-		"-H", fmt.Sprintf("Authorization: %s", s.config.APIAuth), // Исправлено: добавлено "Authorization:"
-		url)
-
-	log.Printf("Выполняется запрос: curl -H 'Token: %s' -H 'Authorization: %s' %s", s.config.APIToken, s.config.APIAuth, url)
-
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		log.Printf("Ошибка cURL (stderr: %s)", stderr.String())
-		return nil, fmt.Errorf("ошибка cURL: %v", err)
+	url := fmt.Sprintf("%s?barcode=%s", s.baseURL, barcode)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		log.Printf("[FetchBarcodeData] Ошибка создания запроса: %v", err)
+		return nil, fmt.Errorf("ошибка запроса: %v", err)
 	}
 
-	// Проверяем пустой ответ
-	if out.String() == "" {
-		log.Printf("API вернул пустой ответ для штрихкода: %s", barcode)
-		return nil, fmt.Errorf("API вернул пустой ответ")
+	req.Header.Set("Token", s.token)
+	req.Header.Set("Authorization", fmt.Sprintf("Basic %s", s.auth))
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		log.Printf("[FetchBarcodeData] Ошибка выполнения запроса: %v", err)
+		return nil, fmt.Errorf("ошибка выполнения: %v", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("[FetchBarcodeData] Ошибка чтения ответа: %v", err)
+		return nil, fmt.Errorf("ошибка чтения: %v", err)
 	}
 
-	log.Printf("Ответ API: %s", out.String()) // Логируем ответ API
+	body := string(bodyBytes)
+	log.Printf("[FetchBarcodeData] Ответ API: %s", body)
 
-	var item models.ItemResponse
-	if err := json.Unmarshal(out.Bytes(), &item); err != nil {
-		log.Printf("Ошибка разбора JSON: %v", err)
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[FetchBarcodeData] Неверный статус: %d, тело: %s", resp.StatusCode, body)
+		if strings.Contains(body, "Не найден товар") {
+			return nil, fmt.Errorf("товар не найден по штрихкоду: %s", barcode)
+		}
+		return nil, fmt.Errorf("ошибка API: статус %d, ответ: %s", resp.StatusCode, body)
+	}
+
+	var itemResponse models.ItemResponse
+	if err := json.Unmarshal(bodyBytes, &itemResponse); err != nil {
+		log.Printf("[FetchBarcodeData] Ошибка разбора JSON: %v, тело: %s", err, body)
+		if strings.Contains(body, "Не найден товар") {
+			return nil, fmt.Errorf("товар не найден по штрихкоду: %s", barcode)
+		}
 		return nil, fmt.Errorf("ошибка разбора JSON: %v", err)
 	}
 
-	// Проверка на пустой ответ
-	if item.Name == "" && len(item.Stock) == 0 {
-		log.Printf("Штрихкод %s не найден в API", barcode)
-		return nil, fmt.Errorf("штрихкод %s не найден", barcode)
-	}
-
-	return &item, nil
+	return &itemResponse, nil
 }

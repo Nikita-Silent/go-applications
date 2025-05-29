@@ -4,7 +4,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 
 	"web-barcode-scanner/handlers"
 	"web-barcode-scanner/services"
@@ -13,47 +12,36 @@ import (
 )
 
 func main() {
-	// Загрузка .env
+	log.Println("[Main] Запуск приложения")
+
+	// Загрузка .env файла
 	if err := godotenv.Load(); err != nil {
-		log.Fatalf("Ошибка загрузки файла .env: %v", err)
+		log.Printf("[Main] Не удалось загрузить .env файл: %v, продолжаем с переменными окружения", err)
 	}
 
-	// Получение конфигурации из .env
-	config := services.Config{
-		APIURL:   os.Getenv("API_URL"),
-		APIToken: os.Getenv("API_TOKEN"),
-		APIAuth:  os.Getenv("API_AUTH"),
-	}
-	if config.APIURL == "" || config.APIToken == "" || config.APIAuth == "" {
-		log.Fatal("Ошибка: Не указаны API_URL, API_TOKEN или API_AUTH в .env")
+	// Чтение переменных окружения
+	baseURL := os.Getenv("BASE_URL")
+	token := os.Getenv("TOKEN")
+	auth := os.Getenv("AUTH")
+
+	// Проверка наличия переменных
+	if baseURL == "" || token == "" || auth == "" {
+		log.Fatal("[Main] Ошибка: отсутствуют необходимые переменные окружения (BASE_URL, TOKEN, AUTH)")
 	}
 
-	// Создание сервиса
-	barcodeService := services.NewBarcodeService(config)
+	log.Printf("[Main] Конфигурация: BASE_URL=%s, TOKEN=%s, AUTH=%s", baseURL, token, auth)
 
-	// Получение путей к сертификатам
-	dir, err := os.Getwd()
-	if err != nil {
-		log.Fatalf("Ошибка получения текущей директории: %v", err)
-	}
-	certPath := filepath.Join(dir, "cert.pem")
-	keyPath := filepath.Join(dir, "key.pem")
-
-	// Проверка сертификатов
-	if _, err := os.Stat(certPath); err != nil {
-		log.Fatalf("Файл сертификата не найден: %s", certPath)
-	}
-	if _, err := os.Stat(keyPath); err != nil {
-		log.Fatalf("Файл ключа не найден: %s", keyPath)
-	}
+	// Инициализация сервиса
+	barcodeService := services.NewBarcodeService(baseURL, token, auth)
+	handler := handlers.NewHandler(barcodeService)
 
 	// Настройка маршрутов
-	handler := handlers.NewHandler(barcodeService)
 	http.HandleFunc("/", handler.Index)
 	http.HandleFunc("/scan", handler.Scan)
 
-	log.Printf("Сервер запускается на :8080 с HTTPS, сертификат: %s, ключ: %s", certPath, keyPath)
-	if err := http.ListenAndServeTLS(":8080", certPath, keyPath, nil); err != nil {
-		log.Fatalf("Ошибка запуска сервера: %v", err)
+	// Запуск HTTPS-сервера
+	log.Println("[Main] Запуск сервера на :8080")
+	if err := http.ListenAndServeTLS(":8080", "cert.pem", "key.pem", nil); err != nil {
+		log.Fatalf("[Main] Ошибка запуска сервера: %v", err)
 	}
 }
