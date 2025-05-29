@@ -1,0 +1,21 @@
+services:
+  web-barcode-scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./cert.pem:/app/cert.pem
+      - ./key.pem:/app/key.pem
+      - ./.env:/app/.env
+    environment:
+      - BASE_URL=${BASE_URL}
+      - TOKEN=${TOKEN}
+      - AUTH=${AUTH}
+    networks:
+      - barcode-network
+
+networks:
+  barcode-network:
+    driver: bridge
