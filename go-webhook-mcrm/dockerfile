@@ -1,8 +1,10 @@
-# Используем официальный образ Go как базовый
-FROM golang:1.23-alpine AS builder
+# Используем официальный образ Go 1.23 с Alpine v3.20 для стабильности
+FROM golang:1.23.1-alpine3.20 AS builder
 
-# Установка необходимых пакетов
-RUN apk add --no-cache git build-base
+# Обновление индекса пакетов и установка необходимых пакетов
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && \
+    apk update && \
+    apk add --no-cache git build-base
 
 # Установка рабочей директории
 WORKDIR /app
@@ -18,7 +20,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 
 # Финальный образ
-FROM alpine:latest
+FROM alpine:3.20
 
 # Установка базовых пакетов
 RUN apk add --no-cache ca-certificates

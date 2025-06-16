@@ -67,6 +67,19 @@ type ListmonkGetResponse struct {
 	} `json:"data"`
 }
 
+type ListmonkSubscriberListResponse struct {
+	Data []struct {
+		ID      int                    `json:"id"`
+		Email   string                 `json:"email"`
+		Attribs map[string]interface{} `json:"attribs"`
+		Phone   string                 `json:"phone"`
+		Status  string                 `json:"status"`
+		Lists   []struct {
+			ID int `json:"id"`
+		} `json:"lists"`
+	} `json:"data"`
+}
+
 type LogEntry struct {
 	ErrorMessage string `json:"error_message"`
 	Timestamp    string `json:"timestamp"`
@@ -180,9 +193,34 @@ func updateRetryEntry(pbURL string, entry RetryEntry) error {
 }
 
 func processWebhook(c echo.Context) error {
-	serial := c.QueryParam("serial")
-	event := c.QueryParam("event")
+	// Логируем заголовки запроса
+	log.Printf("Webhook headers: %v", c.Request().Header)
+
+	// Читаем тело запроса
+	bodyBytes, err := io.ReadAll(c.Request().Body)
+	if err != nil {
+		logError("Failed to read webhook body:", err.Error())
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	// Восстанавливаем тело запроса для дальнейшей обработки
+	c.Request().Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	log.Printf("Received webhook body: %s", string(bodyBytes))
+
+	// Извлечение параметров из query string (на случай, если они там)
+	serialFromQuery := c.QueryParam("serial")
+	eventFromQuery := c.QueryParam("event")
+	log.Printf("Extracted from query: serial=%s, event=%s", serialFromQuery, eventFromQuery)
+
+	// Извлечение параметров из тела как формы
+	serial := c.FormValue("serial")
+	event := c.FormValue("event")
 	cleanedSerial := cleanSerial(serial)
+	log.Printf("Extracted from form body: serial=%s, event=%s, cleanedSerial=%s", serial, event, cleanedSerial)
+
+	if serial == "" || event == "" {
+		logError("Missing serial or event in webhook", fmt.Sprintf("Query: serial=%s, event=%s, Body: %s", serialFromQuery, eventFromQuery, string(bodyBytes)))
+		return c.NoContent(http.StatusBadRequest)
+	}
 
 	log.Printf("Received webhook: serial=%s, event=%s, cleanedSerial=%s", serial, event, cleanedSerial)
 
@@ -640,6 +678,168 @@ func checkSubscriptions(pbURL, apiKey string) {
 	}
 }
 
+func syncListmonkSubscribers(pbURL, listmonkURL, username, apiKey string, listID int) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	log.Printf("Starting syncListmonkSubscribers with listID: %d", listID)
+
+	// Проверка валидности listID
+	if listID <= 0 {
+		logError("Invalid listID:", fmt.Sprintf("listID=%d is not a valid identifier", listID))
+		return
+	}
+
+	// Очистка listmonkURL от /subscribers и завершающих слешей
+	cleanedURL := strings.TrimSuffix(listmonkURL, "/")
+	cleanedURL = strings.TrimSuffix(cleanedURL, "/subscribers")
+	log.Printf("Cleaned LISTMONK_API_URL: %s", cleanedURL)
+
+	for {
+		var totalProcessed int
+
+		// Начало с первой страницы
+		page := 1
+		for {
+			log.Printf("Fetching page %d for list_id=%d", page, listID)
+			// Запрос списка подписчиков из Listmonk с указанием страницы
+			auth := "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+apiKey))
+			reqURL := fmt.Sprintf("%s/subscribers?list_id=%d&page=%d", cleanedURL, listID, page)
+			log.Printf("Request URL: %s", reqURL)
+			req, err := http.NewRequest("GET", reqURL, nil)
+			if err != nil {
+				logError("Listmonk GET subscribers request error:", err.Error())
+				break
+			}
+			req.Header.Set("Authorization", auth)
+
+			resp, err := client.Do(req)
+			log.Printf("Response received: Status=%d, Error=%v", resp.StatusCode, err)
+			if err != nil {
+				logError("Listmonk GET subscribers API request failed:", err.Error())
+				time.Sleep(5 * time.Minute)
+				break
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				body, err := io.ReadAll(resp.Body)
+				if err != nil {
+					logError("Failed to read Listmonk response body:", err.Error())
+				} else {
+					logError("Listmonk GET subscribers API error:", fmt.Sprintf("Status: %d, Body: %s", resp.StatusCode, string(body)))
+				}
+				time.Sleep(5 * time.Minute)
+				break
+			}
+
+			var listmonkResp struct {
+				Data struct {
+					Results []struct {
+						ID      int                    `json:"id"`
+						Email   string                 `json:"email"`
+						Attribs map[string]interface{} `json:"attribs"`
+						Phone   string                 `json:"phone"`
+						Status  string                 `json:"status"`
+						Lists   []struct {
+							ID int `json:"id"`
+						} `json:"lists"`
+					} `json:"results"`
+					Total   int `json:"total"`
+					PerPage int `json:"per_page"`
+					Page    int `json:"page"`
+				} `json:"data"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&listmonkResp); err != nil {
+				body, err := io.ReadAll(resp.Body)
+				if err != nil {
+					logError("Failed to read Listmonk response body:", err.Error())
+				} else {
+					logError("Listmonk GET subscribers decode error:", fmt.Sprintf("Error: %v, Response: %s", err, string(body)))
+				}
+				time.Sleep(5 * time.Minute)
+				break
+			}
+
+			log.Printf("Received page %d: total=%d, per_page=%d, results=%d", page, listmonkResp.Data.Total, listmonkResp.Data.PerPage, len(listmonkResp.Data.Results))
+
+			// Получаем текущих подписчиков из PocketBase
+			pbResp, err := http.Get(fmt.Sprintf("%s/api/collections/subscribers/records", pbURL))
+			if err != nil {
+				logError("PocketBase fetch subscribers error:", err.Error())
+				time.Sleep(5 * time.Minute)
+				break
+			}
+			defer pbResp.Body.Close()
+
+			var subscribers struct {
+				Items []SubscriberEntry `json:"items"`
+			}
+			if err := json.NewDecoder(pbResp.Body).Decode(&subscribers); err != nil {
+				logError("PocketBase decode subscribers error:", err.Error())
+				time.Sleep(5 * time.Minute)
+				break
+			}
+
+			// Мапа для быстрого поиска существующих подписчиков по email
+			existingSubscribers := make(map[string]bool)
+			for _, sub := range subscribers.Items {
+				existingSubscribers[sub.Email] = true
+			}
+
+			// Обработка списка из Listmonk
+			for _, subscriber := range listmonkResp.Data.Results {
+				// Проверяем, подписан ли пользователь на указанный list_id (уже учтено в запросе)
+				isInList := false
+				for _, list := range subscriber.Lists {
+					if list.ID == listID {
+						isInList = true
+						break
+					}
+				}
+				if !isInList {
+					continue
+				}
+
+				// Извлекаем phone из attribs, если есть
+				phone := ""
+				if attribs, ok := subscriber.Attribs["phone"]; ok {
+					if phoneStr, ok := attribs.(string); ok {
+						phone = phoneStr
+					}
+				}
+
+				// Проверяем, есть ли пользователь в PocketBase
+				if !existingSubscribers[subscriber.Email] {
+					newSubscriber := SubscriberEntry{
+						UID:         subscriber.ID,
+						Email:       subscriber.Email,
+						Phone:       phone,
+						BonusStatus: false,
+					}
+					id, err := logToPocketBase(pbURL, "subscribers", newSubscriber, "")
+					if err != nil {
+						logError("Failed to save new subscriber from Listmonk:", err.Error())
+						continue
+					}
+					newSubscriber.ID = id
+					log.Printf("Added new subscriber from Listmonk: UID=%d, Email=%s, Phone=%s", subscriber.ID, subscriber.Email, phone)
+					totalProcessed++
+				}
+			}
+
+			// Проверяем, закончилась ли пагинация
+			if len(listmonkResp.Data.Results) == 0 || page*listmonkResp.Data.PerPage >= listmonkResp.Data.Total {
+				log.Printf("Processed %d subscribers from Listmonk (total: %d)", totalProcessed, listmonkResp.Data.Total)
+				break
+			}
+
+			page++
+			time.Sleep(1 * time.Second) // Пауза между страницами, чтобы не перегружать API
+		}
+
+		time.Sleep(10 * time.Minute) // Синхронизация раз в 10 минут
+	}
+}
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
@@ -666,6 +866,22 @@ func main() {
 
 	go checkSubscriptions(os.Getenv("POCKETBASE_URL"), os.Getenv("MCRM_API_KEY"))
 	go processRetry(os.Getenv("POCKETBASE_URL"), os.Getenv("MCRM_API_KEY"))
+
+	// Запуск синхронизации подписчиков из Listmonk
+	listIDStr := os.Getenv("LIST_ID")
+	log.Printf("LIST_ID from env: %s", listIDStr)
+	listID, err := strconv.Atoi(listIDStr)
+	if err != nil {
+		log.Fatalf("Invalid LIST_ID: %v (value: %s)", err, listIDStr)
+	}
+	log.Printf("Launching syncListmonkSubscribers with listID: %d", listID)
+	go syncListmonkSubscribers(
+		os.Getenv("POCKETBASE_URL"),
+		os.Getenv("LISTMONK_API_URL"),
+		os.Getenv("LISTMONK_USERNAME"),
+		os.Getenv("LISTMONK_API_KEY"),
+		listID,
+	)
 
 	log.Fatal(e.Start(":8080"))
 }
