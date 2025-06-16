@@ -1,0 +1,39 @@
+# Используем официальный образ Go как базовый
+FROM golang:1.22-alpine AS builder
+
+# Установка необходимых пакетов
+RUN apk add --no-cache git build-base
+
+# Установка рабочей директории
+WORKDIR /app
+
+# Копирование go.mod и go.sum для кэширования зависимостей
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Копирование остального кода
+COPY . .
+
+# Сборка приложения
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+
+# Финальный образ
+FROM alpine:latest
+
+# Установка базовых пакетов
+RUN apk add --no-cache ca-certificates
+
+# Установка рабочей директории
+WORKDIR /app
+
+# Копирование бинарного файла из этапа сборки
+COPY --from=builder /app/main .
+
+# Копирование .env файла (если используется)
+COPY .env .env
+
+# Открытие порта
+EXPOSE 8080
+
+# Команда запуска
+CMD ["./main"]

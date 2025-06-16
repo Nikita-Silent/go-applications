@@ -1,0 +1,31 @@
+services:
+  sync-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    networks:
+      - sync-network
+    depends_on:
+      - pocketbase
+
+  pocketbase:
+    build:
+      context: ./pocketbase_/
+      dockerfile: Dockerfile
+    ports:
+      - "8090:8090"
+    volumes:
+      - pocketbase-data:/pb_data
+    networks:
+      - sync-network
+
+networks:
+  sync-network:
+    driver: bridge
+
+volumes:
+  pocketbase-data:
