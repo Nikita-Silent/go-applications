@@ -836,7 +836,7 @@ func syncListmonkSubscribers(pbURL, listmonkURL, username, apiKey string, listID
 			time.Sleep(1 * time.Second) // Пауза между страницами, чтобы не перегружать API
 		}
 
-		time.Sleep(10 * time.Minute) // Синхронизация раз в 10 минут
+		time.Sleep(6 * time.Hour) // Синхронизация раз в 10 минут
 	}
 }
 
