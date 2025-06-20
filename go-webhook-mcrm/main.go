@@ -397,7 +397,7 @@ func processRetry(pbURL, apiKey string) {
 		resp, err := http.Get(fmt.Sprintf("%s/api/collections/retry/records", pbURL))
 		if err != nil {
 			logError("Failed to fetch retry entries:", err.Error())
-			time.Sleep(30 * time.Second)
+			time.Sleep(60 * time.Second)
 			continue
 		}
 		defer resp.Body.Close()
@@ -407,7 +407,7 @@ func processRetry(pbURL, apiKey string) {
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&retryData); err != nil {
 			logError("Failed to decode retry entries:", err.Error())
-			time.Sleep(30 * time.Second)
+			time.Sleep(60 * time.Second)
 			continue
 		}
 
@@ -536,7 +536,7 @@ func processRetry(pbURL, apiKey string) {
 			}
 		}
 
-		time.Sleep(30 * time.Second)
+		time.Sleep(60 * time.Second)
 	}
 }
 
