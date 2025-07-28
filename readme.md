@@ -1,3 +1,3 @@
 ## Привет, читатель! 
 Я тут реализую свои небольшие хотелки, которые я надеюсь в будущем смогут помочь кому-нибудь еще.
-[Веб сканер штрихкода с запросом по API](https://github.com/Nikita-Silent/go-applications/tree/main/web-barcode-scanner)
+[Веб сканер штрихкода с запросом по API](https://github.com/Nikita-Silent/go-applications/)
